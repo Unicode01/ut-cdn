@@ -150,8 +150,10 @@ func thread_transfer_client_to_server(client_id string, server_conn *websocket.C
 		if err != nil {
 			// check if the connection is closed normally or not
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || err == io.EOF {
+				server_conn.Close()
 				logger.Log(fmt.Sprintf("Server connection closed normally for client ID:%s", client_id), 1)
 			} else {
+				server_conn.Close()
 				logger.Log(fmt.Sprintf("Read remote server(ID:%s) message failed: %v", client_id, err), 2)
 			}
 			break
@@ -159,6 +161,7 @@ func thread_transfer_client_to_server(client_id string, server_conn *websocket.C
 		// write data to the remote server
 		err = server_conn.WriteMessage(mt, message)
 		if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
+			client_conn.Close()
 			logger.Log(fmt.Sprintf("Send client(ID:%s) message failed:", client_id)+err.Error(), 2)
 			break
 		}
@@ -177,7 +180,7 @@ func thread_transfer_server_to_client(client_id string, server_conn *websocket.C
 		mt, message, err = server_conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || err == io.EOF {
-				// check if the connection is closed normally or not
+				client_conn.Close()
 				logger.Log(fmt.Sprintf("Client connection closed normally for ID:%s", client_id), 1)
 			} else {
 				logger.Log(fmt.Sprintf("Read client(ID:%s) message failed: %v", client_id, err), 2)
@@ -187,6 +190,7 @@ func thread_transfer_server_to_client(client_id string, server_conn *websocket.C
 		// write data to the client
 		err = client_conn.WriteMessage(mt, message)
 		if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
+			server_conn.Close()
 			logger.Log(fmt.Sprintf("Send remote server(ID:%s) message failed:", client_id)+err.Error(), 2)
 			break
 		}
