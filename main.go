@@ -86,9 +86,8 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_flag := false
-	tmp_allowed_urls := tmp_hosts.Allowed_urls
-	for i := 0; i < len(tmp_allowed_urls); i++ {
-		if r.URL.Path == tmp_allowed_urls[i] {
+	for i := 0; i < len(tmp_hosts.Allowed_urls); i++ {
+		if r.URL.Path == tmp_hosts.Allowed_urls[i] {
 			_flag = true
 			break
 		}
