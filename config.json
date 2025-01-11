@@ -1,0 +1,20 @@
+{
+    "LoggerLevel": 1,
+    "Server": {
+        "Port": 7777,
+        "Host": "0.0.0.0"
+    },
+    "Transfer": {
+        "MapHosts": [
+            {
+                "ServerId": "1",
+                "Host": "f1670756-0b3d-4a04-86e9-743a0a1f418b",
+                "AllowedUrls": [
+                    "/wss"
+                ],
+                "Origin": "127.0.0.1:443"
+            },
+            {}
+        ]
+    }
+}
