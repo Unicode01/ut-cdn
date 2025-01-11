@@ -113,7 +113,7 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 	}
 	go thread_transfer_client_to_server(client_id, server_conn, conn)
 	go thread_transfer_server_to_client(client_id, server_conn, conn)
-	logger.Log(fmt.Sprintf("WebSocket connection established ID:%s", client_id), 1)
+	logger.Log(fmt.Sprintf("WebSocket connection established ID:%s ServerID:%s", client_id, tmp_hosts.Server_id), 1)
 }
 
 func save_config_to_map() {
