@@ -103,7 +103,7 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tmp_headers := http.Header{}
-	tmp_headers.Set("X-Forwarded-For", client_id)
+	tmp_headers.Set("X-Forwarded-For", r.Header.Get("X-Forwarded-For"))
 	tmp_headers.Set("Host", r.Host)
 	// create the remote server connection
 	server_conn, _, err := websocket.DefaultDialer.Dial("ws://"+tmp_hosts.Origin+r.URL.Path, tmp_headers)
