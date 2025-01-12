@@ -105,8 +105,16 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 	tmp_headers := http.Header{}
 	tmp_headers.Set("X-Forwarded-For", r.Header.Get("X-Forwarded-For"))
 	tmp_headers.Set("Host", r.Host)
+	if r.Header.Get("Sec-WebSocket-Protocol") != "" {
+		tmp_headers.Set("Sec-WebSocket-Protocol", r.Header.Get("Sec-WebSocket-Protocol"))
+	}
 	// create the remote server connection
-	server_conn, _, err := websocket.DefaultDialer.Dial("ws://"+tmp_hosts.Origin+r.URL.Path, tmp_headers)
+	var server_conn *websocket.Conn
+	if r.URL.RawQuery == "" {
+		server_conn, _, err = websocket.DefaultDialer.Dial("ws://"+tmp_hosts.Origin+r.URL.Path, tmp_headers)
+	} else {
+		server_conn, _, err = websocket.DefaultDialer.Dial("ws://"+tmp_hosts.Origin+r.URL.Path+"?"+r.URL.RawQuery, tmp_headers)
+	}
 	if err != nil {
 		logger.Log(fmt.Sprintf("Create remote server connection failed ID:%s", client_id)+err.Error(), 2)
 		return
