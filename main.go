@@ -16,10 +16,10 @@ import (
 )
 
 type type_webServer struct {
-	Enable   bool   `json:"Enable"`
-	Host     string `json:"Host"`
-	Port     int    `json:"Port"`
-	Password string `json:"Password"`
+	Enable bool   `json:"Enable"`
+	Host   string `json:"Host"`
+	Port   int    `json:"Port"`
+	URL    string `json:"URL"`
 }
 
 type type_server struct {
@@ -28,7 +28,8 @@ type type_server struct {
 }
 
 type type_transfer struct {
-	MapHosts []type_hosts2origin `json:"MapHosts"`
+	MapHosts                []type_hosts2origin `json:"MapHosts"`
+	EnableTransferStatistcs bool                `json:"EnableTransferStatistcs"`
 }
 
 type type_hosts2origin struct {
@@ -54,6 +55,12 @@ var (
 			return true // allow all origins
 		},
 	}
+	DataTransferred int64 = 0 //in+out
+	RequestCount    int64 = 0
+	ErrorsCount     int64 = 0
+	StartTime       int   = int(time.Now().Unix())
+	ActiveClients   int64 = 0
+	IPs                   = make(map[string]int64)
 )
 
 func main() {
@@ -62,6 +69,7 @@ func main() {
 	}
 	if gl_config.WebServer.Enable {
 		go load_web_server()
+		go Upgrade_ServerStatus()
 	}
 	save_config_to_map()
 	go re_read_config()
@@ -161,6 +169,7 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 	}
 	go thread_transfer_client_to_server(client_id, server_conn, conn)
 	go thread_transfer_server_to_client(client_id, server_conn, conn)
+	RequestCount += 1
 	logger.Log(fmt.Sprintf("WebSocket connection established ID:%s ServerID:%s", client_id, tmp_hosts.Server_id), 1)
 }
 
@@ -192,6 +201,31 @@ func thread_transfer_client_to_server(client_id string, server_conn *websocket.C
 	// enters the loop to transfer data
 	var mt int
 	var message []byte
+	if gl_config.Transfer.EnableTransferStatistcs {
+		for {
+			// read data from the client
+			mt, message, err = client_conn.ReadMessage()
+			if err != nil {
+				// check if the connection is closed normally or not
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || err == io.EOF {
+					server_conn.Close()
+					logger.Log(fmt.Sprintf("Server connection closed normally for client ID:%s", client_id), 1)
+				} else {
+					server_conn.Close()
+					logger.Log(fmt.Sprintf("Read remote server(ID:%s) message failed: %v", client_id, err), 2)
+				}
+				return
+			}
+			// write data to the remote server
+			err = server_conn.WriteMessage(mt, message)
+			if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
+				client_conn.Close()
+				logger.Log(fmt.Sprintf("Send client(ID:%s) message failed:", client_id)+err.Error(), 2)
+				return
+			}
+			DataTransferred += int64(len(message))
+		}
+	}
 	for {
 		// read data from the client
 		mt, message, err = client_conn.ReadMessage()
@@ -204,14 +238,14 @@ func thread_transfer_client_to_server(client_id string, server_conn *websocket.C
 				server_conn.Close()
 				logger.Log(fmt.Sprintf("Read remote server(ID:%s) message failed: %v", client_id, err), 2)
 			}
-			break
+			return
 		}
 		// write data to the remote server
 		err = server_conn.WriteMessage(mt, message)
 		if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
 			client_conn.Close()
 			logger.Log(fmt.Sprintf("Send client(ID:%s) message failed:", client_id)+err.Error(), 2)
-			break
+			return
 		}
 	}
 
@@ -223,6 +257,29 @@ func thread_transfer_server_to_client(client_id string, server_conn *websocket.C
 	// enters the loop to transfer data
 	var mt int
 	var message []byte
+	if gl_config.Transfer.EnableTransferStatistcs {
+		for {
+			// read data from the remote server
+			mt, message, err = server_conn.ReadMessage()
+			if err != nil {
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || err == io.EOF {
+					client_conn.Close()
+					logger.Log(fmt.Sprintf("Client connection closed normally for ID:%s", client_id), 1)
+				} else {
+					logger.Log(fmt.Sprintf("Read client(ID:%s) message failed: %v", client_id, err), 2)
+				}
+				return
+			}
+			// write data to the client
+			err = client_conn.WriteMessage(mt, message)
+			if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
+				server_conn.Close()
+				logger.Log(fmt.Sprintf("Send remote server(ID:%s) message failed:", client_id)+err.Error(), 2)
+				return
+			}
+			DataTransferred += int64(len(message))
+		}
+	}
 	for {
 		// read data from the remote server
 		mt, message, err = server_conn.ReadMessage()
@@ -233,20 +290,35 @@ func thread_transfer_server_to_client(client_id string, server_conn *websocket.C
 			} else {
 				logger.Log(fmt.Sprintf("Read client(ID:%s) message failed: %v", client_id, err), 2)
 			}
-			break
+			return
 		}
 		// write data to the client
 		err = client_conn.WriteMessage(mt, message)
 		if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
 			server_conn.Close()
 			logger.Log(fmt.Sprintf("Send remote server(ID:%s) message failed:", client_id)+err.Error(), 2)
-			break
+			return
 		}
 	}
 
 }
 
 func load_web_server() {
-	webserver.StartWebServer(gl_config.WebServer.Host, gl_config.WebServer.Port, gl_config.WebServer.Password)
+	webserver.StartWebServer(gl_config.WebServer.Host, gl_config.WebServer.Port, gl_config.WebServer.URL)
+
+}
+
+func Upgrade_ServerStatus() {
+	for {
+		time.Sleep(time.Second)
+		webserver.Upgrade_ServerStatus(webserver.Type_ServerStatus{
+			ActiveClients:   ActiveClients,
+			DataTransferred: DataTransferred,
+			Requests:        RequestCount,
+			Errors:          ErrorsCount,
+			StartTime:       StartTime,
+			IPs:             IPs,
+		})
+	}
 
 }

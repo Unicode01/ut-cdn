@@ -5,6 +5,7 @@
         "Host": "0.0.0.0"
     },
     "Transfer": {
+        "EnableTransferStatistcs": true,
         "MapHosts": [
             {
                 "ServerId": "1",
@@ -20,6 +21,7 @@
         "Enable": true,
         "Host": "0.0.0.0",
         "Port": 8888,
-        "Password:": ""
+        "URL:": "/checkstatus",
+        "CookieTimeout": 3600
     }
 }
