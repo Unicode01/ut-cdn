@@ -9,9 +9,17 @@ import (
 	"os"
 	"time"
 	"ut-cdn/mods/logger"
+	"ut-cdn/mods/webserver"
 
 	"github.com/gorilla/websocket"
 )
+
+type type_webServer struct {
+	Enable   bool   `json:"Enable"`
+	Host     string `json:"Host"`
+	Port     int    `json:"Port"`
+	Password string `json:"Password"`
+}
 
 type type_server struct {
 	Host string `json:"Host"`
@@ -30,9 +38,10 @@ type type_hosts2origin struct {
 }
 
 type type_config struct {
-	LoggerLevel int           `json:"LoggerLevel"`
-	Server      type_server   `json:"Server"`
-	Transfer    type_transfer `json:"Transfer"`
+	LoggerLevel int            `json:"LoggerLevel"`
+	Server      type_server    `json:"Server"`
+	Transfer    type_transfer  `json:"Transfer"`
+	WebServer   type_webServer `json:"WebServer"`
 }
 
 var (
@@ -50,7 +59,11 @@ func main() {
 	if !read_config() {
 		return
 	}
+	if gl_config.WebServer.Enable {
+		go load_web_server()
+	}
 	save_config_to_map()
+	go re_read_config()
 	server = &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", gl_config.Server.Host, gl_config.Server.Port),
 		Handler: http.HandlerFunc(handle_request),
@@ -61,6 +74,16 @@ func main() {
 		logger.Log(err.Error(), 3)
 	}
 
+}
+
+func re_read_config() {
+	for {
+		time.Sleep(time.Second * 10)
+		if !read_config() {
+			continue
+		}
+		save_config_to_map()
+	}
 }
 
 func read_config() bool {
@@ -125,6 +148,7 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 }
 
 func save_config_to_map() {
+	Map_Hosts = make(map[string]type_hosts2origin)
 	for i := 0; i < len(gl_config.Transfer.MapHosts); i++ {
 		Map_Hosts[gl_config.Transfer.MapHosts[i].Host] = type_hosts2origin{
 			Host:         gl_config.Transfer.MapHosts[i].Host,
@@ -146,7 +170,6 @@ func radom_client_id() string {
 
 func thread_transfer_client_to_server(client_id string, server_conn *websocket.Conn, client_conn *websocket.Conn) {
 	var err error
-	// generate the headers for the remote server request
 	defer server_conn.Close()
 	defer client_conn.Close()
 	// enters the loop to transfer data
@@ -203,5 +226,10 @@ func thread_transfer_server_to_client(client_id string, server_conn *websocket.C
 			break
 		}
 	}
+
+}
+
+func load_web_server() {
+	webserver.StartWebServer(gl_config.WebServer.Host, gl_config.WebServer.Port, gl_config.WebServer.Password)
 
 }
