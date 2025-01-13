@@ -12,6 +12,7 @@ import (
 	"ut-cdn/mods/webserver"
 
 	"github.com/gorilla/websocket"
+	"github.com/howeyc/fsnotify"
 )
 
 type type_webServer struct {
@@ -77,12 +78,28 @@ func main() {
 }
 
 func re_read_config() {
+	//file detect
+	watcher, err := fsnotify.NewWatcher()
+	watcher.Watch("config.json")
+	if err != nil {
+		logger.Log(err.Error(), 3)
+		return
+	}
+	defer watcher.Close()
+
 	for {
-		time.Sleep(time.Second * 10)
-		if !read_config() {
-			continue
+		select {
+		case e := <-watcher.Event:
+			if e.IsModify() {
+				if !read_config() {
+					continue
+				}
+				save_config_to_map()
+			}
+		case err := <-watcher.Error:
+			logger.Log(err.Error(), 3)
+			return
 		}
-		save_config_to_map()
 	}
 }
 
