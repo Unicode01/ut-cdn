@@ -7,6 +7,8 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"time"
 	"ut-cdn/mods/logger"
 	"ut-cdn/mods/webserver"
@@ -59,8 +61,8 @@ var (
 	RequestCount    int64 = 0
 	ErrorsCount     int64 = 0
 	StartTime       int   = int(time.Now().Unix())
-	ActiveClients   int64 = 0
-	IPs                   = make(map[string]int64)
+	ActiveSessions  sync.Map
+	IPs             = make(map[string]int64)
 )
 
 func main() {
@@ -151,6 +153,15 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tmp_headers := http.Header{}
+	client_ip := r.Header.Get("X-Forwarded-For")
+	if client_ip != "" {
+		client_ip = strings.Split(client_ip, ",")[0]
+	} else {
+		client_ip = r.RemoteAddr
+		if colonIndex := strings.LastIndex(client_ip, ":"); colonIndex != -1 {
+			client_ip = client_ip[:colonIndex] // 去掉端口号
+		}
+	}
 	tmp_headers.Set("X-Forwarded-For", r.Header.Get("X-Forwarded-For"))
 	tmp_headers.Set("Host", r.Host)
 	if r.Header.Get("Sec-WebSocket-Protocol") != "" {
@@ -169,8 +180,10 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 	}
 	go thread_transfer_client_to_server(client_id, server_conn, conn)
 	go thread_transfer_server_to_client(client_id, server_conn, conn)
-	RequestCount += 1
+	RequestCount++
 	logger.Log(fmt.Sprintf("WebSocket connection established ID:%s ServerID:%s", client_id, tmp_hosts.Server_id), 1)
+	IPs[client_ip]++
+	ActiveSessions.Store(client_id, time.Now().Unix())
 }
 
 func save_config_to_map() {
@@ -198,6 +211,7 @@ func thread_transfer_client_to_server(client_id string, server_conn *websocket.C
 	var err error
 	defer server_conn.Close()
 	defer client_conn.Close()
+	defer ActiveSessions.Delete(client_id)
 	// enters the loop to transfer data
 	var mt int
 	var message []byte
@@ -254,6 +268,7 @@ func thread_transfer_server_to_client(client_id string, server_conn *websocket.C
 	var err error
 	defer server_conn.Close()
 	defer client_conn.Close()
+	defer ActiveSessions.Delete(client_id)
 	// enters the loop to transfer data
 	var mt int
 	var message []byte
@@ -312,7 +327,7 @@ func Upgrade_ServerStatus() {
 	for {
 		time.Sleep(time.Second)
 		webserver.Upgrade_ServerStatus(webserver.Type_ServerStatus{
-			ActiveClients:   ActiveClients,
+			ActiveClients:   getSyncMapLength(&ActiveSessions),
 			DataTransferred: DataTransferred,
 			Requests:        RequestCount,
 			Errors:          ErrorsCount,
@@ -321,4 +336,12 @@ func Upgrade_ServerStatus() {
 		})
 	}
 
+}
+func getSyncMapLength(m *sync.Map) int {
+	length := 0
+	m.Range(func(key, value interface{}) bool {
+		length++
+		return true // 继续遍历
+	})
+	return length
 }

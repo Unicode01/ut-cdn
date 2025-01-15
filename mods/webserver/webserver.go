@@ -13,7 +13,7 @@ type Type_ServerStatus struct {
 	Requests        int64
 	Errors          int64
 	StartTime       int
-	ActiveClients   int64
+	ActiveClients   int
 	IPs             map[string]int64
 }
 
