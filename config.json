@@ -21,7 +21,6 @@
         "Enable": true,
         "Host": "0.0.0.0",
         "Port": 8888,
-        "URL:": "/checkstatus",
-        "CookieTimeout": 3600
+        "URL:": "/checkstatus"
     }
 }
