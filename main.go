@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 	"ut-cdn/mods/logger"
 	"ut-cdn/mods/webserver"
@@ -57,12 +56,6 @@ var (
 			return true // allow all origins
 		},
 	}
-	DataTransferred int64 = 0 //in+out
-	RequestCount    int64 = 0
-	ErrorsCount     int64 = 0
-	StartTime       int   = int(time.Now().Unix())
-	ActiveSessions  sync.Map
-	IPs             = make(map[string]int64)
 )
 
 func main() {
@@ -71,7 +64,6 @@ func main() {
 	}
 	if gl_config.WebServer.Enable {
 		go load_web_server()
-		go Upgrade_ServerStatus()
 	}
 	save_config_to_map()
 	go re_read_config()
@@ -180,10 +172,10 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 	}
 	go thread_transfer_client_to_server(client_id, server_conn, conn)
 	go thread_transfer_server_to_client(client_id, server_conn, conn)
-	RequestCount++
+	webserver.ServerStatus.Requests++
 	logger.Log(fmt.Sprintf("WebSocket connection established ID:%s ServerID:%s", client_id, tmp_hosts.Server_id), 1)
-	IPs[client_ip]++
-	ActiveSessions.Store(client_id, time.Now().Unix())
+	webserver.ServerStatus.IPs[client_ip]++
+	webserver.ServerSessions.Store(client_id, time.Now().Unix())
 }
 
 func save_config_to_map() {
@@ -211,7 +203,7 @@ func thread_transfer_client_to_server(client_id string, server_conn *websocket.C
 	var err error
 	defer server_conn.Close()
 	defer client_conn.Close()
-	defer ActiveSessions.Delete(client_id)
+	defer webserver.ServerSessions.Delete(client_id)
 	// enters the loop to transfer data
 	var mt int
 	var message []byte
@@ -237,7 +229,7 @@ func thread_transfer_client_to_server(client_id string, server_conn *websocket.C
 				logger.Log(fmt.Sprintf("Send client(ID:%s) message failed:", client_id)+err.Error(), 2)
 				return
 			}
-			DataTransferred += int64(len(message))
+			webserver.ServerStatus.DataTransferred += int64(len(message))
 		}
 	}
 	for {
@@ -268,7 +260,7 @@ func thread_transfer_server_to_client(client_id string, server_conn *websocket.C
 	var err error
 	defer server_conn.Close()
 	defer client_conn.Close()
-	defer ActiveSessions.Delete(client_id)
+	defer webserver.ServerSessions.Delete(client_id)
 	// enters the loop to transfer data
 	var mt int
 	var message []byte
@@ -292,7 +284,7 @@ func thread_transfer_server_to_client(client_id string, server_conn *websocket.C
 				logger.Log(fmt.Sprintf("Send remote server(ID:%s) message failed:", client_id)+err.Error(), 2)
 				return
 			}
-			DataTransferred += int64(len(message))
+			webserver.ServerStatus.DataTransferred += int64(len(message))
 		}
 	}
 	for {
@@ -321,27 +313,4 @@ func thread_transfer_server_to_client(client_id string, server_conn *websocket.C
 func load_web_server() {
 	webserver.StartWebServer(gl_config.WebServer.Host, gl_config.WebServer.Port, gl_config.WebServer.URL)
 
-}
-
-func Upgrade_ServerStatus() {
-	for {
-		time.Sleep(time.Second)
-		webserver.Upgrade_ServerStatus(webserver.Type_ServerStatus{
-			ActiveClients:   getSyncMapLength(&ActiveSessions),
-			DataTransferred: DataTransferred,
-			Requests:        RequestCount,
-			Errors:          ErrorsCount,
-			StartTime:       StartTime,
-			IPs:             IPs,
-		})
-	}
-
-}
-func getSyncMapLength(m *sync.Map) int {
-	length := 0
-	m.Range(func(key, value interface{}) bool {
-		length++
-		return true // 继续遍历
-	})
-	return length
 }

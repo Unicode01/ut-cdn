@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 	"ut-cdn/mods/logger"
 )
@@ -22,6 +23,7 @@ var (
 	LoggedUserCookies = make(map[string]int)
 	Server            *http.Server
 	ServerStatus      = Type_ServerStatus{0, 0, 0, int(time.Now().Unix()), 0, make(map[string]int64)}
+	ServerSessions    = sync.Map{}
 )
 
 func StartWebServer(Host string, Port int, _URL string) {
@@ -45,6 +47,7 @@ func Web_handle(w http.ResponseWriter, r *http.Request) {
 	logger.Log(fmt.Sprintf("%s(%s)|%s|%s|%s", r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.Method, r.Host, r.URL.Path), 999)
 
 	if r.URL.Path == URL && r.Method == "GET" {
+		ServerStatus.ActiveClients = getSyncMapLength(&ServerSessions)
 		json.Marshal(ServerStatus)
 		w.Header().Set("Content-Type", "application/json")
 		jsonOut, err := json.Marshal(ServerStatus)
@@ -60,4 +63,13 @@ func Web_handle(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNotFound)
 	w.Write([]byte(r.URL.Path + " Not Found"))
+}
+
+func getSyncMapLength(m *sync.Map) int {
+	length := 0
+	m.Range(func(key, value interface{}) bool {
+		length++
+		return true // 继续遍历
+	})
+	return length
 }
