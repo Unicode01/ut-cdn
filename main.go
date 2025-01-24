@@ -16,6 +16,12 @@ import (
 	"github.com/howeyc/fsnotify"
 )
 
+type type_IpFliter struct {
+	Mode         string   `json:"Mode"`
+	RealIpHeader string   `json:"RealIpHeader"`
+	List         []string `json:"List"`
+}
+
 type type_webServer struct {
 	Enable bool   `json:"Enable"`
 	Host   string `json:"Host"`
@@ -45,6 +51,7 @@ type type_config struct {
 	Server      type_server    `json:"Server"`
 	Transfer    type_transfer  `json:"Transfer"`
 	WebServer   type_webServer `json:"WebServer"`
+	IpFliter    type_IpFliter  `json:"IpFliter"`
 }
 
 var (
@@ -56,6 +63,7 @@ var (
 			return true // allow all origins
 		},
 	}
+	Map_Fliter = make(map[string]bool)
 )
 
 func main() {
@@ -121,6 +129,28 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 	client_id := radom_client_id()
 	logger.Log(fmt.Sprintf("%s(%s)|%s|%s|%s - ID:%s", r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.Method, r.Host, r.URL.Path, client_id), 999)
 	// check if the request is allowed
+	client_ip := r.Header.Get(gl_config.IpFliter.RealIpHeader)
+	if client_ip != "" {
+		client_ip = strings.Split(client_ip, ",")[0]
+	} else {
+		client_ip = r.RemoteAddr
+		if colonIndex := strings.LastIndex(client_ip, ":"); colonIndex != -1 {
+			client_ip = client_ip[:colonIndex] // 去掉端口号
+		}
+	}
+	if gl_config.IpFliter.Mode == "whitelist" {
+		if _, ok := Map_Fliter[client_ip]; !ok {
+			w.WriteHeader(http.StatusForbidden)
+			logger.Log(fmt.Sprintf("IP not allowed! ID:%s", client_id), 2)
+			return
+		}
+	} else if gl_config.IpFliter.Mode == "blacklist" {
+		if _, ok := Map_Fliter[client_ip]; ok {
+			w.WriteHeader(http.StatusForbidden)
+			logger.Log(fmt.Sprintf("IP not allowed! ID:%s", client_id), 2)
+			return
+		}
+	}
 	tmp_hosts, tmp_exist := Map_Hosts[r.Host]
 	if !tmp_exist { // if the host is not in the map
 		w.WriteHeader(http.StatusForbidden)
@@ -139,21 +169,13 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 		logger.Log(fmt.Sprintf("Forbidden request ID:%s", client_id), 2)
 		return
 	}
+	// end check if the request is allowed
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Log("Upgrade Request to WebSocket failed", 2)
 		return
 	}
 	tmp_headers := http.Header{}
-	client_ip := r.Header.Get("X-Forwarded-For")
-	if client_ip != "" {
-		client_ip = strings.Split(client_ip, ",")[0]
-	} else {
-		client_ip = r.RemoteAddr
-		if colonIndex := strings.LastIndex(client_ip, ":"); colonIndex != -1 {
-			client_ip = client_ip[:colonIndex] // 去掉端口号
-		}
-	}
 	tmp_headers.Set("X-Forwarded-For", r.Header.Get("X-Forwarded-For"))
 	tmp_headers.Set("Host", r.Host)
 	if r.Header.Get("Sec-WebSocket-Protocol") != "" {
@@ -185,6 +207,14 @@ func save_config_to_map() {
 			Host:         gl_config.Transfer.MapHosts[i].Host,
 			Origin:       gl_config.Transfer.MapHosts[i].Origin,
 			Allowed_urls: gl_config.Transfer.MapHosts[i].Allowed_urls,
+		}
+	}
+	Map_Fliter = make(map[string]bool)
+	for i := 0; i < len(gl_config.IpFliter.List); i++ {
+		if gl_config.IpFliter.Mode == "blacklist" {
+			Map_Fliter[gl_config.IpFliter.List[i]] = false
+		} else if gl_config.IpFliter.Mode == "whitelist" {
+			Map_Fliter[gl_config.IpFliter.List[i]] = true
 		}
 	}
 }

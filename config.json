@@ -21,6 +21,15 @@
         "Enable": true,
         "Host": "0.0.0.0",
         "Port": 8888,
-        "URL:": "/checkstatus"
+        "URL": "/checkstatus"
+    },
+    "IpFliter":{
+        "Mode": "blacklist",
+        "RealIpHeader": "",
+        "//": "none, blacklist, whitelist",
+
+        "List": [
+            "127.0.0.1"
+        ]
     }
 }
