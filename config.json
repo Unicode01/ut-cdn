@@ -16,7 +16,8 @@
                 "AllowedUrls": [
                     "/wss"
                 ],
-                "Origin": "127.0.0.1:443"
+                "Origin": "127.0.0.1:443",
+                "Type":"ws"
             }
         ]
     },
