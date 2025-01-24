@@ -30,8 +30,11 @@ type type_webServer struct {
 }
 
 type type_server struct {
-	Host string `json:"Host"`
-	Port int    `json:"Port"`
+	Host     string `json:"Host"`
+	Port     int    `json:"Port"`
+	SSL      bool   `json:"SSL"`
+	SSL_Cert string `json:"SSL_Cert"`
+	SSL_Key  string `json:"SSL_Key"`
 }
 
 type type_transfer struct {
@@ -80,7 +83,12 @@ func main() {
 		Handler: http.HandlerFunc(handle_request),
 	}
 	logger.Log(fmt.Sprintf("Server running on %s:%d", gl_config.Server.Host, gl_config.Server.Port), 999)
-	err := server.ListenAndServe()
+	var err error
+	if gl_config.Server.SSL {
+		err = server.ListenAndServeTLS(gl_config.Server.SSL_Cert, gl_config.Server.SSL_Key)
+	} else {
+		err = server.ListenAndServe()
+	}
 	if err != nil {
 		logger.Log(err.Error(), 3)
 	}
