@@ -17,7 +17,7 @@ import (
 )
 
 type type_IpFliter struct {
-	Mode         string   `json:"Mode"`
+	Mode         string   `json:"Mode"` //none/blacklist/whitelist
 	RealIpHeader string   `json:"RealIpHeader"`
 	List         []string `json:"List"`
 }
@@ -46,6 +46,7 @@ type type_hosts2origin struct {
 	Server_id    string   `json:"ServerId"`
 	Host         string   `json:"Host"`
 	Origin       string   `json:"Origin"`
+	Type         string   `json:"Type"` // ws/wss
 	Allowed_urls []string `json:"AllowedUrls"`
 }
 
@@ -192,9 +193,17 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 	// create the remote server connection
 	var server_conn *websocket.Conn
 	if r.URL.RawQuery == "" {
-		server_conn, _, err = websocket.DefaultDialer.Dial("ws://"+tmp_hosts.Origin+r.URL.Path, tmp_headers)
+		if strings.ToLower(tmp_hosts.Type) == "wss" {
+			server_conn, _, err = websocket.DefaultDialer.Dial("wss://"+tmp_hosts.Origin+r.URL.Path, tmp_headers)
+		} else {
+			server_conn, _, err = websocket.DefaultDialer.Dial("ws://"+tmp_hosts.Origin+r.URL.Path, tmp_headers)
+		}
 	} else {
-		server_conn, _, err = websocket.DefaultDialer.Dial("ws://"+tmp_hosts.Origin+r.URL.Path+"?"+r.URL.RawQuery, tmp_headers)
+		if strings.ToLower(tmp_hosts.Type) == "wss" {
+			server_conn, _, err = websocket.DefaultDialer.Dial("wss://"+tmp_hosts.Origin+r.URL.Path+"?"+r.URL.RawQuery, tmp_headers)
+		} else {
+			server_conn, _, err = websocket.DefaultDialer.Dial("ws://"+tmp_hosts.Origin+r.URL.Path+"?"+r.URL.RawQuery, tmp_headers)
+		}
 	}
 	if err != nil {
 		logger.Log(fmt.Sprintf("Create remote server connection failed ID:%s", client_id)+err.Error(), 2)
