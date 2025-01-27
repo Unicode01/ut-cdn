@@ -274,24 +274,23 @@ func thread_transfer(client_id string, server_conn *websocket.Conn, client_conn 
 	for {
 		// read data from the client
 		mt, message, err = client_conn.ReadMessage()
-		if err != nil {
-			// check if the connection is closed normally or not
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || err == io.EOF {
-				if flag {
-					logger.Log(fmt.Sprintf("Server connection closed normally. ID:%s", client_id), 1)
-				} else {
-					logger.Log(fmt.Sprintf("Client connection closed normally. ID:%s", client_id), 1)
-				}
-				break
-			} else if err != nil {
-				if flag {
-					logger.Log(fmt.Sprintf("Server connection closed abnormally. ID:%s error:%v", client_id, err), 2)
-				} else {
-					logger.Log(fmt.Sprintf("Client connection closed abnormally. ID:%s error:%v", client_id, err), 2)
-				}
-				break
+		// check if the connection is closed normally or not
+		if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || err == io.EOF {
+			if flag {
+				logger.Log(fmt.Sprintf("Server connection closed normally. ID:%s", client_id), 1)
+			} else {
+				logger.Log(fmt.Sprintf("Client connection closed normally. ID:%s", client_id), 1)
 			}
+			break
+		} else if err != nil {
+			if flag {
+				logger.Log(fmt.Sprintf("Server connection closed abnormally. ID:%s error:%v", client_id, err), 2)
+			} else {
+				logger.Log(fmt.Sprintf("Client connection closed abnormally. ID:%s error:%v", client_id, err), 2)
+			}
+			break
 		}
+
 		// write data to the remote server
 		err = server_conn.WriteMessage(mt, message)
 		if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
