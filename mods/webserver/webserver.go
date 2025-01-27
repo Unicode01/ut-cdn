@@ -16,13 +16,14 @@ type Type_ServerStatus struct {
 	StartTime       int
 	ActiveClients   int
 	IPs             map[string]int64
+	CPU_Time        int64
 }
 
 var (
 	URL               string
 	LoggedUserCookies = make(map[string]int)
 	Server            *http.Server
-	ServerStatus      = Type_ServerStatus{0, 0, 0, int(time.Now().Unix()), 0, make(map[string]int64)}
+	ServerStatus      = Type_ServerStatus{0, 0, 0, int(time.Now().Unix()), 0, make(map[string]int64),0}
 	ServerSessions    = sync.Map{}
 )
 

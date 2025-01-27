@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 	"ut-cdn/mods/logger"
 	"ut-cdn/mods/webserver"
@@ -136,6 +137,8 @@ func read_config() bool {
 func handle_request(w http.ResponseWriter, r *http.Request) {
 
 	client_id := radom_client_id()
+	//calc cpu time start
+	time_start_user,time_start_sys := getCPUTime()
 	logger.Log(fmt.Sprintf("%s(%s)|%s|%s|%s - ID:%s", r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.Method, r.Host, r.URL.Path, client_id), 999)
 	// check if the request is allowed
 	client_ip := r.Header.Get(gl_config.IpFliter.RealIpHeader)
@@ -212,7 +215,12 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 	go thread_transfer_client_to_server(client_id, server_conn, conn)
 	go thread_transfer_server_to_client(client_id, server_conn, conn)
 	webserver.ServerStatus.Requests++
-	logger.Log(fmt.Sprintf("WebSocket connection established ID:%s ServerID:%s", client_id, tmp_hosts.Server_id), 1)
+	// calc cpu time end
+	time_end_user,time_end_sys := getCPUTime()
+	user_time := time_end_sys - time_start_sys
+	sys_time := time_end_user - time_start_user
+	webserver.ServerStatus.CPU_Time +=  sys_time
+	logger.Log(fmt.Sprintf("WebSocket connection established,Time used(sys:%d,user:%d) ID:%s ServerID:%s", sys_time, user_time, client_id, tmp_hosts.Server_id), 1)
 	webserver.ServerStatus.IPs[client_ip]++
 	webserver.ServerSessions.Store(client_id, time.Now().Unix())
 }
@@ -356,4 +364,13 @@ func thread_transfer_server_to_client(client_id string, server_conn *websocket.C
 func load_web_server() {
 	webserver.StartWebServer(gl_config.WebServer.Host, gl_config.WebServer.Port, gl_config.WebServer.URL)
 
+}
+func getCPUTime() (int64, int64) {
+    var usage syscall.Rusage
+    if err := syscall.Getrusage(syscall.RUSAGE_SELF, &usage); err != nil {
+        return 0, 0
+    }
+    userTime := usage.Utime.Nano() // 用户态时间（纳秒）
+    sysTime := usage.Stime.Nano()  // 内核态时间（纳秒）
+    return userTime, sysTime
 }
