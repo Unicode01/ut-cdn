@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -17,10 +18,12 @@ import (
 	"github.com/howeyc/fsnotify"
 )
 
-type type_IpFliter struct {
+type type_IPFilter struct {
 	Mode         string   `json:"Mode"` //none/blacklist/whitelist
 	RealIpHeader string   `json:"RealIpHeader"`
-	List         []string `json:"List"`
+	RawIPList    []string `json:"List"`
+	IpMap        map[string]struct{}
+	cidrs        []*net.IPNet
 }
 
 type type_webServer struct {
@@ -56,7 +59,7 @@ type type_config struct {
 	Server      type_server    `json:"Server"`
 	Transfer    type_transfer  `json:"Transfer"`
 	WebServer   type_webServer `json:"WebServer"`
-	IpFliter    type_IpFliter  `json:"IpFliter"`
+	IpFliter    type_IPFilter  `json:"IpFliter"`
 }
 
 var (
@@ -132,7 +135,10 @@ func read_config() bool {
 		logger.Log(err.Error(), 3)
 		return false
 	}
-	json.Unmarshal(jsonFile, &gl_config)
+	if err := json.Unmarshal(jsonFile, &gl_config); err != nil {
+		logger.Log(fmt.Sprintf("JSON unmarshal error: %v", err), 3)
+		return false
+	}
 	logger.SetLoggerLevel(gl_config.LoggerLevel)
 	return true
 }
@@ -153,18 +159,9 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 			client_ip = client_ip[:colonIndex] // 去掉端口号
 		}
 	}
-	if gl_config.IpFliter.Mode == "whitelist" {
-		if _, ok := Map_Fliter[client_ip]; !ok {
-			w.WriteHeader(http.StatusForbidden)
-			logger.Log(fmt.Sprintf("IP not allowed! ID:%s", client_id), 2)
-			return
-		}
-	} else if gl_config.IpFliter.Mode == "blacklist" {
-		if _, ok := Map_Fliter[client_ip]; ok {
-			w.WriteHeader(http.StatusForbidden)
-			logger.Log(fmt.Sprintf("IP not allowed! ID:%s", client_id), 2)
-			return
-		}
+	if !IPIsAllowed(client_ip) {
+		logger.Log(fmt.Sprintf("IP not allowed! ID:%s", client_id), 2)
+		return
 	}
 	tmp_hosts, tmp_exist := Map_Hosts[r.Host]
 	if !tmp_exist { // if the host is not in the map
@@ -215,8 +212,8 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 		logger.Log(fmt.Sprintf("Create remote server connection failed ID:%s error:%v", client_id, err), 2)
 		return
 	}
-	go thread_transfer_client_to_server(client_id, server_conn, conn, tmp_hosts.Server_id)
-	go thread_transfer_server_to_client(client_id, server_conn, conn, tmp_hosts.Server_id)
+	go thread_transfer(client_id, conn, server_conn, tmp_hosts.Server_id, true)  //client to server
+	go thread_transfer(client_id, server_conn, conn, tmp_hosts.Server_id, false) //server to client
 	webserver.ServerStatus.Requests++
 	// calc cpu time end
 	time_end_user, time_end_sys := getCPUTime()
@@ -228,7 +225,7 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 	webserver.ServerSessions.Store(client_id, time.Now().Unix())
 }
 
-func save_config_to_map() {
+func save_config_to_map() error {
 	//Map Hosts
 	Map_Hosts = make(map[string]type_hosts2origin)
 	for i := 0; i < len(gl_config.Transfer.MapHosts); i++ {
@@ -242,127 +239,78 @@ func save_config_to_map() {
 	}
 	//Map Fliter
 	Map_Fliter = make(map[string]bool)
-	for i := 0; i < len(gl_config.IpFliter.List); i++ {
-		if gl_config.IpFliter.Mode == "blacklist" {
-			Map_Fliter[gl_config.IpFliter.List[i]] = false
-		} else if gl_config.IpFliter.Mode == "whitelist" {
-			Map_Fliter[gl_config.IpFliter.List[i]] = true
+	for _, s := range gl_config.IpFliter.RawIPList {
+		if strings.Contains(s, "/") {
+			_, cidr, err := net.ParseCIDR(s)
+			if err != nil {
+				return err
+			}
+			gl_config.IpFliter.cidrs = append(gl_config.IpFliter.cidrs, cidr)
+		} else {
+			gl_config.IpFliter.IpMap[s] = struct{}{}
 		}
 	}
+	return nil
 }
 
 func radom_client_id() string {
-	rand.Seed(time.Now().UnixNano())
-	var client_id string
-	radom_str := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	for i := 0; i < 10; i++ {
-		client_id += string(radom_str[rand.Intn(len(radom_str))])
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
-	return client_id
+	return fmt.Sprintf("%x", b)
 }
 
-func thread_transfer_client_to_server(client_id string, server_conn *websocket.Conn, client_conn *websocket.Conn, serverID string) {
+func thread_transfer(client_id string, server_conn *websocket.Conn, client_conn *websocket.Conn, serverID string, flag bool) { //flag->true:client->server,false:server->client
 	var err error
-	defer server_conn.Close()
-	defer client_conn.Close()
-	defer webserver.ServerSessions.Delete(client_id)
+	defer func() {
+		server_conn.Close()
+		client_conn.Close()
+		webserver.ServerSessions.Delete(client_id)
+	}()
 	// enters the loop to transfer data
 	var mt int
 	var message []byte
-	if gl_config.Transfer.EnableTransferStatistcs {
-		for {
-			// read data from the client
-			mt, message, err = client_conn.ReadMessage()
-			if err != nil {
-				// check if the connection is closed normally or not
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || err == io.EOF {
-					server_conn.Close()
-					logger.Log(fmt.Sprintf("Server connection closed normally for client ID:%s", client_id), 1)
-				} else {
-					server_conn.Close()
-					logger.Log(fmt.Sprintf("Read remote server(ID:%s) message failed: %v", client_id, err), 2)
-				}
-				return
-			}
-			// write data to the remote server
-			err = server_conn.WriteMessage(mt, message)
-			if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
-				client_conn.Close()
-				logger.Log(fmt.Sprintf("Send client(ID:%s) message failed:%v", client_id, err), 2)
-				return
-			}
-			webserver.ServerStatus.DataTransferred[serverID] += int64(len(message))
-		}
-	}
 	for {
 		// read data from the client
 		mt, message, err = client_conn.ReadMessage()
 		if err != nil {
 			// check if the connection is closed normally or not
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || err == io.EOF {
-				server_conn.Close()
-				logger.Log(fmt.Sprintf("Server connection closed normally for client ID:%s", client_id), 1)
-			} else {
-				server_conn.Close()
-				logger.Log(fmt.Sprintf("Read remote server(ID:%s) message failed: %v", client_id, err), 2)
+				if flag {
+					logger.Log(fmt.Sprintf("Server connection closed normally. ID:%s", client_id), 1)
+				} else {
+					logger.Log(fmt.Sprintf("Client connection closed normally. ID:%s", client_id), 1)
+				}
+				break
+			} else if err != nil {
+				if flag {
+					logger.Log(fmt.Sprintf("Server connection closed abnormally. ID:%s error:%v", client_id, err), 2)
+				} else {
+					logger.Log(fmt.Sprintf("Client connection closed abnormally. ID:%s error:%v", client_id, err), 2)
+				}
+				break
 			}
-			return
 		}
 		// write data to the remote server
 		err = server_conn.WriteMessage(mt, message)
 		if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
-			client_conn.Close()
-			logger.Log(fmt.Sprintf("Send client(ID:%s) message failed:%v", client_id, err), 2)
-			return
-		}
-	}
-
-}
-func thread_transfer_server_to_client(client_id string, server_conn *websocket.Conn, client_conn *websocket.Conn, serverID string) {
-	var err error
-	defer server_conn.Close()
-	defer client_conn.Close()
-	defer webserver.ServerSessions.Delete(client_id)
-	// enters the loop to transfer data
-	var mt int
-	var message []byte
-	if gl_config.Transfer.EnableTransferStatistcs {
-		for {
-			// read data from the remote server
-			mt, message, err = server_conn.ReadMessage()
-			if err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || err == io.EOF {
-					logger.Log(fmt.Sprintf("Client connection closed normally for ID:%s", client_id), 1)
-				} else {
-					logger.Log(fmt.Sprintf("Read client(ID:%s) message failed: %v", client_id, err), 2)
-				}
-				return
-			}
-			// write data to the client
-			err = client_conn.WriteMessage(mt, message)
-			if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
-				logger.Log(fmt.Sprintf("Send remote server(ID:%s) message failed:%v", client_id, err), 2)
-				return
-			}
-			webserver.ServerStatus.DataTransferred[serverID] += int64(len(message))
-		}
-	}
-	for {
-		// read data from the remote server
-		mt, message, err = server_conn.ReadMessage()
-		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || err == io.EOF {
-				logger.Log(fmt.Sprintf("Client connection closed normally for ID:%s", client_id), 1)
+			if flag {
+				logger.Log(fmt.Sprintf("Server connection closed normally. ID:%s", client_id), 1)
 			} else {
-				logger.Log(fmt.Sprintf("Read client(ID:%s) message failed: %v", client_id, err), 2)
+				logger.Log(fmt.Sprintf("Client connection closed normally. ID:%s", client_id), 1)
 			}
-			return
+			break
+		} else if err != nil {
+			if flag {
+				logger.Log(fmt.Sprintf("Server connection write failed. ID:%s error:%v", client_id, err), 2)
+			} else {
+				logger.Log(fmt.Sprintf("Client connection write failed. ID:%s error:%v", client_id, err), 2)
+			}
+			break
 		}
-		// write data to the client
-		err = client_conn.WriteMessage(mt, message)
-		if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
-			logger.Log(fmt.Sprintf("Send remote server(ID:%s) message failed:", client_id)+err.Error(), 2)
-			return
+		if gl_config.Transfer.EnableTransferStatistcs {
+			webserver.ServerStatus.DataTransferred[serverID] += int64(len(message))
 		}
 	}
 
@@ -380,4 +328,25 @@ func getCPUTime() (int64, int64) {
 	userTime := usage.Utime.Nano() // 用户态时间（纳秒）
 	sysTime := usage.Stime.Nano()  // 内核态时间（纳秒）
 	return userTime, sysTime
+}
+
+func IPIsAllowed(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+
+	// 检查精确匹配
+	if _, exists := gl_config.IpFliter.IpMap[ipStr]; exists {
+		return gl_config.IpFliter.Mode == "whitelist"
+	}
+
+	// 检查CIDR范围
+	for _, cidr := range gl_config.IpFliter.cidrs {
+		if cidr.Contains(ip) {
+			return gl_config.IpFliter.Mode == "whitelist"
+		}
+	}
+
+	return gl_config.IpFliter.Mode != "whitelist"
 }
