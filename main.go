@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"syscall"
 	"time"
 	"ut-cdn/mods/logger"
 	"ut-cdn/mods/webserver"
@@ -318,15 +317,6 @@ func thread_transfer(client_id string, server_conn *websocket.Conn, client_conn 
 func load_web_server() {
 	webserver.StartWebServer(gl_config.WebServer.Host, gl_config.WebServer.Port, gl_config.WebServer.URL)
 
-}
-func getCPUTime() (int64, int64) {
-	var usage syscall.Rusage
-	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &usage); err != nil {
-		return 0, 0
-	}
-	userTime := usage.Utime.Nano() // 用户态时间（纳秒）
-	sysTime := usage.Stime.Nano()  // 内核态时间（纳秒）
-	return userTime, sysTime
 }
 
 func IPIsAllowed(ipStr string) bool {
