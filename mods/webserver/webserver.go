@@ -10,7 +10,7 @@ import (
 )
 
 type Type_ServerStatus struct {
-	DataTransferred map[string]int64   //Map ServerID -> DataTransferred
+	DataTransferred map[string]int64 //Map ServerID -> DataTransferred
 	Requests        int64
 	Errors          int64
 	StartTime       int
