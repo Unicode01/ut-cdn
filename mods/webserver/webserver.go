@@ -10,7 +10,7 @@ import (
 )
 
 type Type_ServerStatus struct {
-	DataTransferred int64
+	DataTransferred map[string]int64   //Map ServerID -> DataTransferred
 	Requests        int64
 	Errors          int64
 	StartTime       int
@@ -23,7 +23,7 @@ var (
 	URL               string
 	LoggedUserCookies = make(map[string]int)
 	Server            *http.Server
-	ServerStatus      = Type_ServerStatus{0, 0, 0, int(time.Now().Unix()), 0, make(map[string]int64),0}
+	ServerStatus      = Type_ServerStatus{make(map[string]int64), 0, 0, int(time.Now().Unix()), 0, make(map[string]int64), 0}
 	ServerSessions    = sync.Map{}
 )
 

@@ -111,10 +111,13 @@ func re_read_config() {
 		select {
 		case e := <-watcher.Event:
 			if e.IsModify() {
+				//file modify
+				logger.Log("config.json modified, reloading...", 999)
 				if !read_config() {
 					continue
 				}
 				save_config_to_map()
+				logger.Log("config.json reloaded", 999)
 			}
 		case err := <-watcher.Error:
 			logger.Log(err.Error(), 3)
@@ -138,7 +141,7 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 
 	client_id := radom_client_id()
 	//calc cpu time start
-	time_start_user,time_start_sys := getCPUTime()
+	time_start_user, time_start_sys := getCPUTime()
 	logger.Log(fmt.Sprintf("%s(%s)|%s|%s|%s - ID:%s", r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.Method, r.Host, r.URL.Path, client_id), 999)
 	// check if the request is allowed
 	client_ip := r.Header.Get(gl_config.IpFliter.RealIpHeader)
@@ -209,31 +212,35 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		logger.Log(fmt.Sprintf("Create remote server connection failed ID:%s", client_id)+err.Error(), 2)
+		logger.Log(fmt.Sprintf("Create remote server connection failed ID:%s error:%v", client_id, err), 2)
 		return
 	}
-	go thread_transfer_client_to_server(client_id, server_conn, conn)
-	go thread_transfer_server_to_client(client_id, server_conn, conn)
+	go thread_transfer_client_to_server(client_id, server_conn, conn, tmp_hosts.Server_id)
+	go thread_transfer_server_to_client(client_id, server_conn, conn, tmp_hosts.Server_id)
 	webserver.ServerStatus.Requests++
 	// calc cpu time end
-	time_end_user,time_end_sys := getCPUTime()
+	time_end_user, time_end_sys := getCPUTime()
 	user_time := time_end_sys - time_start_sys
 	sys_time := time_end_user - time_start_user
-	webserver.ServerStatus.CPU_Time +=  sys_time
+	webserver.ServerStatus.CPU_Time += sys_time
 	logger.Log(fmt.Sprintf("WebSocket connection established,Time used(sys:%d,user:%d) ID:%s ServerID:%s", sys_time, user_time, client_id, tmp_hosts.Server_id), 1)
 	webserver.ServerStatus.IPs[client_ip]++
 	webserver.ServerSessions.Store(client_id, time.Now().Unix())
 }
 
 func save_config_to_map() {
+	//Map Hosts
 	Map_Hosts = make(map[string]type_hosts2origin)
 	for i := 0; i < len(gl_config.Transfer.MapHosts); i++ {
 		Map_Hosts[gl_config.Transfer.MapHosts[i].Host] = type_hosts2origin{
+			Server_id:    gl_config.Transfer.MapHosts[i].Server_id,
 			Host:         gl_config.Transfer.MapHosts[i].Host,
 			Origin:       gl_config.Transfer.MapHosts[i].Origin,
 			Allowed_urls: gl_config.Transfer.MapHosts[i].Allowed_urls,
+			Type:         gl_config.Transfer.MapHosts[i].Type,
 		}
 	}
+	//Map Fliter
 	Map_Fliter = make(map[string]bool)
 	for i := 0; i < len(gl_config.IpFliter.List); i++ {
 		if gl_config.IpFliter.Mode == "blacklist" {
@@ -254,7 +261,7 @@ func radom_client_id() string {
 	return client_id
 }
 
-func thread_transfer_client_to_server(client_id string, server_conn *websocket.Conn, client_conn *websocket.Conn) {
+func thread_transfer_client_to_server(client_id string, server_conn *websocket.Conn, client_conn *websocket.Conn, serverID string) {
 	var err error
 	defer server_conn.Close()
 	defer client_conn.Close()
@@ -281,10 +288,10 @@ func thread_transfer_client_to_server(client_id string, server_conn *websocket.C
 			err = server_conn.WriteMessage(mt, message)
 			if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
 				client_conn.Close()
-				logger.Log(fmt.Sprintf("Send client(ID:%s) message failed:", client_id)+err.Error(), 2)
+				logger.Log(fmt.Sprintf("Send client(ID:%s) message failed:%v", client_id, err), 2)
 				return
 			}
-			webserver.ServerStatus.DataTransferred += int64(len(message))
+			webserver.ServerStatus.DataTransferred[serverID] += int64(len(message))
 		}
 	}
 	for {
@@ -305,13 +312,13 @@ func thread_transfer_client_to_server(client_id string, server_conn *websocket.C
 		err = server_conn.WriteMessage(mt, message)
 		if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
 			client_conn.Close()
-			logger.Log(fmt.Sprintf("Send client(ID:%s) message failed:", client_id)+err.Error(), 2)
+			logger.Log(fmt.Sprintf("Send client(ID:%s) message failed:%v", client_id, err), 2)
 			return
 		}
 	}
 
 }
-func thread_transfer_server_to_client(client_id string, server_conn *websocket.Conn, client_conn *websocket.Conn) {
+func thread_transfer_server_to_client(client_id string, server_conn *websocket.Conn, client_conn *websocket.Conn, serverID string) {
 	var err error
 	defer server_conn.Close()
 	defer client_conn.Close()
@@ -334,10 +341,10 @@ func thread_transfer_server_to_client(client_id string, server_conn *websocket.C
 			// write data to the client
 			err = client_conn.WriteMessage(mt, message)
 			if err == websocket.ErrCloseSent || err == websocket.ErrBadHandshake || err == io.EOF {
-				logger.Log(fmt.Sprintf("Send remote server(ID:%s) message failed:", client_id)+err.Error(), 2)
+				logger.Log(fmt.Sprintf("Send remote server(ID:%s) message failed:%v", client_id, err), 2)
 				return
 			}
-			webserver.ServerStatus.DataTransferred += int64(len(message))
+			webserver.ServerStatus.DataTransferred[serverID] += int64(len(message))
 		}
 	}
 	for {
@@ -366,11 +373,11 @@ func load_web_server() {
 
 }
 func getCPUTime() (int64, int64) {
-    var usage syscall.Rusage
-    if err := syscall.Getrusage(syscall.RUSAGE_SELF, &usage); err != nil {
-        return 0, 0
-    }
-    userTime := usage.Utime.Nano() // 用户态时间（纳秒）
-    sysTime := usage.Stime.Nano()  // 内核态时间（纳秒）
-    return userTime, sysTime
+	var usage syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &usage); err != nil {
+		return 0, 0
+	}
+	userTime := usage.Utime.Nano() // 用户态时间（纳秒）
+	sysTime := usage.Stime.Nano()  // 内核态时间（纳秒）
+	return userTime, sysTime
 }
