@@ -11,7 +11,7 @@ import (
 
 type Type_ServerStatus struct {
 	DataTransferred map[string]int64 //Map ServerID -> DataTransferred
-	Requests        int64
+	Requests        map[string]int64
 	Errors          int64
 	StartTime       int
 	ActiveClients   int
@@ -23,17 +23,19 @@ var (
 	URL               string
 	LoggedUserCookies = make(map[string]int)
 	Server            *http.Server
-	ServerStatus      = Type_ServerStatus{make(map[string]int64), 0, 0, int(time.Now().Unix()), 0, make(map[string]int64), 0}
+	ServerStatus      = Type_ServerStatus{make(map[string]int64), make(map[string]int64), 0, int(time.Now().Unix()), 0, make(map[string]int64), 0}
 	ServerSessions    = sync.Map{}
+	Headers           = make(map[string]string)
 )
 
-func StartWebServer(Host string, Port int, _URL string) {
+func StartWebServer(Host string, Port int, _URL string, _Headers map[string]string) {
 	logger.Log(fmt.Sprintf("Starting webserver on %s:%d for %s...", Host, Port, _URL), 999)
 	Server = &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", Host, Port),
 		Handler: http.HandlerFunc(Web_handle),
 	}
 	URL = _URL
+	Headers = _Headers
 	err := Server.ListenAndServe()
 	if err != nil {
 		logger.Log(fmt.Sprintf("Error starting webserver: %s", err.Error()), 3)
@@ -46,6 +48,9 @@ func Upgrade_ServerStatus(ServSt Type_ServerStatus) {
 
 func Web_handle(w http.ResponseWriter, r *http.Request) {
 	logger.Log(fmt.Sprintf("%s(%s)|%s|%s|%s", r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.Method, r.Host, r.URL.Path), 999)
+	for Name, Value := range Headers {
+		w.Header().Set(Name, Value)
+	}
 
 	if r.URL.Path == URL && r.Method == "GET" {
 		ServerStatus.ActiveClients = getSyncMapLength(&ServerSessions)

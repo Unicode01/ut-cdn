@@ -26,10 +26,11 @@ type type_IPFilter struct {
 }
 
 type type_webServer struct {
-	Enable bool   `json:"Enable"`
-	Host   string `json:"Host"`
-	Port   int    `json:"Port"`
-	URL    string `json:"URL"`
+	Enable  bool              `json:"Enable"`
+	Host    string            `json:"Host"`
+	Port    int               `json:"Port"`
+	URL     string            `json:"URL"`
+	Headers map[string]string `json:"Headers"`
 }
 
 type type_server struct {
@@ -213,7 +214,7 @@ func handle_request(w http.ResponseWriter, r *http.Request) {
 	}
 	go thread_transfer(client_id, conn, server_conn, tmp_hosts.Server_id, true)  //client to server
 	go thread_transfer(client_id, server_conn, conn, tmp_hosts.Server_id, false) //server to client
-	webserver.ServerStatus.Requests++
+	webserver.ServerStatus.Requests[tmp_hosts.Server_id]++
 	// calc cpu time end
 	time_end_user, time_end_sys := getCPUTime()
 	user_time := time_end_sys - time_start_sys
@@ -315,8 +316,7 @@ func thread_transfer(client_id string, server_conn *websocket.Conn, client_conn 
 }
 
 func load_web_server() {
-	webserver.StartWebServer(gl_config.WebServer.Host, gl_config.WebServer.Port, gl_config.WebServer.URL)
-
+	webserver.StartWebServer(gl_config.WebServer.Host, gl_config.WebServer.Port, gl_config.WebServer.URL, gl_config.WebServer.Headers)
 }
 
 func IPIsAllowed(ipStr string) bool {

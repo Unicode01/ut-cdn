@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>流量监控仪表盘</title>
+    <style>
+        /* 基础样式重置 */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+        }
+
+        body {
+            background: #f0f2f5;
+            padding: 2rem;
+        }
+
+        /* 仪表盘容器 */
+        .dashboard {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        /* 通用卡片样式 */
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 数据块标题样式 */
+        .card h2 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 0.5rem;
+        }
+
+        /* 关键指标样式 */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 1rem;
+        }
+
+        .metric-subtext {
+            font-size: 0.9rem;
+            color: #7f8c8d;
+            margin-top: 0.3rem;
+        }
+
+        .metric-item {
+            text-align: center;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .metric-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .metric-unit {
+            font-size: 0.8rem;
+            color: #7f8c8d;
+            margin-left: 0.3rem;
+        }
+
+        .metric-label {
+            color: #7f8c8d;
+            margin-top: 0.5rem;
+        }
+
+        /* 表格样式 */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .data-table th {
+            background: #3498db;
+            color: white;
+        }
+
+        .data-table tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        /* 数值格式化 */
+        .number {
+            font-family: 'Courier New', monospace;
+            color: #27ae60;
+        }
+
+        .node-request-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 0.8rem;
+            margin-top: 1rem;
+        }
+        .node-badge {
+            background: #f0f2f5;
+            padding: 0.5rem;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        /* 时间戳显示 */
+        .timestamp {
+            color: #e67e22;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <!-- 关键指标卡片 -->
+        <div class="card">
+            <h2>核心指标</h2>
+            <div class="metrics-grid">
+                <div class="metric-item">
+                    <div class="metric-value" id="requests">0</div>
+                    <div class="metric-label">总请求量</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value" id="errors">0</div>
+                    <div class="metric-label">错误数量</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value" id="clients">0</div>
+                    <div class="metric-label">活跃客户端</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value" id="cpu">0<span class="metric-unit">s</span></div>
+                    <div class="metric-label">CPU 时间</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value" id="avg-cpu">0<span class="metric-unit">ms/req</span></div>
+                    <div class="metric-label">平均 CPU 时间</div>
+                </div>
+            </div>
+            <div class="node-request-grid" id="node-requests"></div>
+        </div>
+
+        <!-- 数据传输卡片 -->
+        <div class="card">
+            <h2>数据传输量 (bytes)
+                <div style="font-size: 1rem; color: #7f8c8d; margin-top: 0.5rem;">
+                    总计: <span class="number" id="total-transferred">0 B</span>
+                </div>
+            </h2>
+            <table class="data-table" id="data-transferred">
+                <thead>
+                    <tr>
+                        <th>节点名称</th>
+                        <th>传输量</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- 数据请求数卡片 -->
+        <div class="card">
+            <h2>节点请求数
+                <div style="font-size: 1rem; color: #7f8c8d; margin-top: 0.5rem;">
+                    总计: <span class="number" id="total-requests">0</span>
+                </div>
+            </h2>
+            <table class="data-table" id="requests">
+                <thead>
+                    <tr>
+                        <th>节点名称</th>
+                        <th>请求数</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- IP统计卡片 -->
+        <div class="card">
+            <h2>IP请求统计</h2>
+            <table class="data-table" id="ip-stats">
+                <thead>
+                    <tr>
+                        <th>IP地址</th>
+                        <th>请求次数</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- 系统信息卡片 -->
+        <div class="card">
+            <h2>系统信息</h2>
+            <div class="metric-item">
+                <div class="metric-value timestamp" id="start-time"></div>
+                <div class="metric-label">启动时间</div>
+            </div>
+        </div>
+    </div>
+    <script src="./render.js"></script>
+</body>
+</html>
